@@ -63,12 +63,13 @@ export const POST = routeApi(async (req: NextRequest, ctx: ContexteApi) => {
   const statutFinal = ctx.environnement === "sandbox" ? "envoye" : "livre";
   const r = await pool.query(
     `INSERT INTO messages (tenant_id, api_key_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, delivered_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, CASE WHEN $8 = 'livre' THEN NOW() ELSE NULL END)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING id, canal, de, vers, statut, operateur_route, cout, created_at`,
     [
       ctx.tenantId, ctx.apiKeyId, canal, de, vers, sujet, contenu, statutFinal, categorie,
       rt?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut"),
       rt?.pays ?? null, rt?.cout_par_unite ?? 0.0002,
+      statutFinal === "livre" ? new Date() : null,
     ]
   );
   await pool.query(
