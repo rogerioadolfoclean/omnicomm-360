@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --background: #060b1a;
+  --foreground: #e5ecff;
+  --carte: #0c1428;
+  --bordure: #1c2a4a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Fond dégradé bleu nuit du mockup */
+.fond-mockup {
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(37, 99, 235, 0.22), transparent 55%),
+    radial-gradient(ellipse at 15% 40%, rgba(30, 64, 175, 0.12), transparent 45%),
+    radial-gradient(ellipse at 85% 70%, rgba(8, 145, 178, 0.1), transparent 45%),
+    var(--background);
+}
+
+.carte {
+  background: linear-gradient(160deg, rgba(23, 37, 84, 0.35), rgba(12, 20, 40, 0.9));
+  border: 1px solid var(--bordure);
+  border-radius: 0.75rem;
+}
+
+.titre-degrade {
+  background: linear-gradient(90deg, #ffffff, #93c5fd 55%, #38bdf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0a1120; }
+::-webkit-scrollbar-thumb { background: #24365e; border-radius: 6px; }
