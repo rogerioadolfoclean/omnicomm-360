@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { routeApi, erreurJson, type ContexteApi } from "@/lib/api-auth";
+import { envoyerViaPasserelle } from "@/lib/gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -60,15 +61,31 @@ export const POST = routeApi(async (req: NextRequest, ctx: ContexteApi) => {
     [canal === "rcs" ? "sms" : canal, vers]
   );
   const rt = route.rows[0];
-  const statutFinal = ctx.environnement === "sandbox" ? "envoye" : "livre";
+
+  // Passerelle réelle (Twilio) si configurée — jamais en environnement sandbox
+  const passerelle =
+    ctx.environnement === "production"
+      ? await envoyerViaPasserelle(canal, vers, contenu)
+      : ({ mode: "demo" } as const);
+  const statutFinal =
+    passerelle.mode === "reel"
+      ? passerelle.statut
+      : ctx.environnement === "sandbox"
+        ? "envoye"
+        : "livre";
+  const operateur =
+    passerelle.mode === "reel"
+      ? `Twilio → ${rt?.operateur ?? "international"}`
+      : rt?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut");
+
   const r = await pool.query(
-    `INSERT INTO messages (tenant_id, api_key_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, delivered_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     RETURNING id, canal, de, vers, statut, operateur_route, cout, created_at`,
+    `INSERT INTO messages (tenant_id, api_key_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, erreur, delivered_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     RETURNING id, canal, de, vers, statut, operateur_route, cout, erreur, created_at`,
     [
       ctx.tenantId, ctx.apiKeyId, canal, de, vers, sujet, contenu, statutFinal, categorie,
-      rt?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut"),
-      rt?.pays ?? null, rt?.cout_par_unite ?? 0.0002,
+      operateur, rt?.pays ?? null, rt?.cout_par_unite ?? 0.0002,
+      passerelle.mode === "reel" ? passerelle.erreur : null,
       statutFinal === "livre" ? new Date() : null,
     ]
   );
@@ -77,5 +94,14 @@ export const POST = routeApi(async (req: NextRequest, ctx: ContexteApi) => {
      VALUES ($1,$2,$3,$4,0,$5,$6,$7)`,
     [ctx.tenantId, canal === "email" ? "email" : canal === "fax" ? "fax" : "sms", de, vers, rt?.cout_par_unite ?? 0.0002, rt?.operateur ?? null, rt?.pays ?? null]
   );
-  return NextResponse.json({ donnees: r.rows[0] }, { status: 201 });
+  return NextResponse.json(
+    {
+      donnees: r.rows[0],
+      mode: passerelle.mode,
+      ...(passerelle.mode === "demo"
+        ? { note: "Mode démonstration : message enregistré et routé, sans envoi physique (configurez TWILIO_* pour l'envoi réel)." }
+        : {}),
+    },
+    { status: 201 }
+  );
 });

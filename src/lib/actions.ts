@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import crypto from "crypto";
 import { pool } from "./db";
 import { exigerEcriture, exigerAdmin, audit } from "./auth";
+import { envoyerViaPasserelle } from "./gateway";
 
 /** Routage Least-Cost (RF-001) : choisit l'opérateur le moins cher pour le préfixe. */
 async function routerLeastCost(canal: string, vers: string) {
@@ -48,13 +49,23 @@ export async function envoyerMessage(formData: FormData) {
   }
 
   const route = await routerLeastCost(canal, vers);
+
+  // Passerelle réelle (Twilio) si configurée, sinon mode démonstration
+  const passerelle = await envoyerViaPasserelle(canal, vers, contenu);
+  const statut = passerelle.mode === "reel" ? passerelle.statut : "livre";
+  const operateur =
+    passerelle.mode === "reel"
+      ? `Twilio → ${route?.operateur ?? "international"}`
+      : route?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut");
+
   await pool.query(
-    `INSERT INTO messages (tenant_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, delivered_at)
-     VALUES ($1,$2,$3,$4,$5,$6,'livre',$7,$8,$9,$10,NOW())`,
+    `INSERT INTO messages (tenant_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, erreur, delivered_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
-      s.tenantId, canal, de, vers, sujet, contenu, categorie,
-      route?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut"),
+      s.tenantId, canal, de, vers, sujet, contenu, statut, categorie, operateur,
       route?.pays ?? null, route?.cout_par_unite ?? 0.0002,
+      passerelle.mode === "reel" ? passerelle.erreur : null,
+      statut === "livre" ? new Date() : null,
     ]
   );
   // CDR (RF-023)
