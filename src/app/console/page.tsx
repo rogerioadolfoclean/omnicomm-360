@@ -18,6 +18,7 @@ export default async function VueEnsemble({
     pool.query(`SELECT
       (SELECT COUNT(*) FROM messages) AS messages,
       (SELECT COUNT(*) FROM messages WHERE statut = 'livre') AS messages_livres,
+      (SELECT COUNT(*) FROM messages WHERE statut = 'simule') AS messages_simules,
       (SELECT COUNT(*) FROM appels) AS appels,
       (SELECT COALESCE(ROUND(AVG(mos_score),2),0) FROM appels WHERE mos_score IS NOT NULL) AS mos_moyen,
       (SELECT COUNT(*) FROM sims WHERE statut = 'active') AS sims_actives,
@@ -50,7 +51,12 @@ export default async function VueEnsemble({
 
       {/* Statistiques clés */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <CarteStat libelle="Messages envoyés" valeur={s.messages} detail={`${s.messages_livres} livrés`} couleur="sky" />
+        <CarteStat
+          libelle="Messages enregistrés"
+          valeur={s.messages}
+          detail={`${s.messages_livres} livrés · ${s.messages_simules} simulés`}
+          couleur="sky"
+        />
         <CarteStat libelle="Appels" valeur={s.appels} detail={`MOS moyen ${s.mos_moyen}`} couleur="violet" />
         <CarteStat libelle="SIM IoT actives" valeur={`${s.sims_actives}/${s.sims_total}`} detail="AgriTech / Minier / Logistique" couleur="emerald" />
         <CarteStat libelle="Numéros attribués" valeur={s.numeros} detail="locaux, mobiles, gratuits, payants" couleur="emerald" />

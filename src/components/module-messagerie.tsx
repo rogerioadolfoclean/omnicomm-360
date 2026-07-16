@@ -28,6 +28,7 @@ export async function ModuleMessagerie({
     pool.query(
       `SELECT COUNT(*) AS total,
               COUNT(*) FILTER (WHERE statut = 'livre') AS livres,
+              COUNT(*) FILTER (WHERE statut = 'simule') AS simules,
               COUNT(*) FILTER (WHERE statut IN ('echoue','rejete_dnd')) AS echecs,
               COALESCE(SUM(cout),0)::numeric(12,4) AS cout
        FROM messages WHERE canal = ANY($1)`,
@@ -45,15 +46,24 @@ export async function ModuleMessagerie({
     ),
   ]);
   const s = stats.rows[0];
-  const taux = Number(s.total) ? Math.round((Number(s.livres) / Number(s.total)) * 100) : 0;
+  // Le taux de livraison ne porte que sur les envois réellement émis :
+  // les messages « simulé » n'ont jamais quitté la plateforme.
+  const emisReels = Number(s.total) - Number(s.simules);
+  const taux = emisReels > 0 ? Math.round((Number(s.livres) / emisReels) * 100) : 0;
 
   return (
     <div>
       <EnTetePage rf={rf} titre={titre} sousTitre={sousTitre} couleur="sky" />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <CarteStat libelle="Total envoyés" valeur={s.total} couleur="sky" />
-        <CarteStat libelle="Livrés" valeur={s.livres} detail={`taux de livraison ${taux}%`} couleur="emerald" />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <CarteStat libelle="Total enregistrés" valeur={s.total} couleur="sky" />
+        <CarteStat
+          libelle="Livrés (réels)"
+          valeur={s.livres}
+          detail={emisReels > 0 ? `taux ${taux}% sur ${emisReels} émis` : "aucun envoi réel"}
+          couleur="emerald"
+        />
+        <CarteStat libelle="Simulés (non envoyés)" valeur={s.simules} detail="mode démonstration" couleur="amber" />
         <CarteStat libelle="Échecs / rejets DND" valeur={s.echecs} couleur="cyan" />
         <CarteStat libelle="Coût cumulé" valeur={`${s.cout} $`} couleur="amber" />
       </div>
