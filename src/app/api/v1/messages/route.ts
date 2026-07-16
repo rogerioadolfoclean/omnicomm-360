@@ -62,31 +62,28 @@ export const POST = routeApi(async (req: NextRequest, ctx: ContexteApi) => {
   );
   const rt = route.rows[0];
 
-  // Passerelle réelle (Twilio) si configurée — jamais en environnement sandbox
+  // Passerelle réelle (Twilio) si configurée — jamais en environnement sandbox.
+  // Sans passerelle, le statut est « simule » : rien n'est parti physiquement.
   const passerelle =
     ctx.environnement === "production"
       ? await envoyerViaPasserelle(canal, vers, contenu)
-      : ({ mode: "demo" } as const);
-  const statutFinal =
-    passerelle.mode === "reel"
-      ? passerelle.statut
-      : ctx.environnement === "sandbox"
-        ? "envoye"
-        : "livre";
-  const operateur =
-    passerelle.mode === "reel"
-      ? `Twilio → ${rt?.operateur ?? "international"}`
-      : rt?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut");
+      : ({ mode: "demo", raison: "Clé sandbox : aucun envoi physique" } as const);
+  const reel = passerelle.mode === "reel";
+  const statutFinal = reel ? passerelle.statut : "simule";
+  const operateur = reel
+    ? `Twilio → ${rt?.operateur ?? "international"}`
+    : rt?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut");
 
   const r = await pool.query(
-    `INSERT INTO messages (tenant_id, api_key_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, erreur, delivered_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-     RETURNING id, canal, de, vers, statut, operateur_route, cout, erreur, created_at`,
+    `INSERT INTO messages (tenant_id, api_key_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, erreur, mode_envoi, fournisseur_id, delivered_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NULL)
+     RETURNING id, canal, de, vers, statut, operateur_route, cout, erreur, mode_envoi, fournisseur_id, created_at`,
     [
       ctx.tenantId, ctx.apiKeyId, canal, de, vers, sujet, contenu, statutFinal, categorie,
       operateur, rt?.pays ?? null, rt?.cout_par_unite ?? 0.0002,
-      passerelle.mode === "reel" ? passerelle.erreur : null,
-      statutFinal === "livre" ? new Date() : null,
+      reel ? passerelle.erreur : passerelle.raison,
+      reel ? "reel" : "demo",
+      reel ? passerelle.fournisseurId : null,
     ]
   );
   await pool.query(
@@ -98,9 +95,12 @@ export const POST = routeApi(async (req: NextRequest, ctx: ContexteApi) => {
     {
       donnees: r.rows[0],
       mode: passerelle.mode,
-      ...(passerelle.mode === "demo"
-        ? { note: "Mode démonstration : message enregistré et routé, sans envoi physique (configurez TWILIO_* pour l'envoi réel)." }
-        : {}),
+      ...(reel
+        ? {}
+        : {
+            avertissement:
+              "AUCUN ENVOI PHYSIQUE. Message enregistré, routé et facturé en base uniquement (statut « simule »). Configurez TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_PHONE_NUMBER pour l'envoi réel.",
+          }),
     },
     { status: 201 }
   );

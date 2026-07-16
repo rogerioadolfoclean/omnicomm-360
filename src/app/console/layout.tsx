@@ -3,6 +3,7 @@ import { exigerSession } from "@/lib/auth";
 import { seDeconnecter } from "@/lib/auth-actions";
 import { DOMAINES } from "@/lib/constants";
 import { ACCENTS } from "@/components/ui";
+import { BandeauPasserelle } from "@/components/bandeau-passerelle";
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const session = await exigerSession();
@@ -23,6 +24,12 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
             className="block px-3 py-2 rounded-md text-sm text-slate-200 hover:bg-sky-500/10 border border-transparent hover:border-sky-500/30"
           >
             📊 Vue d&apos;ensemble
+          </Link>
+          <Link
+            href="/console/passerelle"
+            className="block px-3 py-2 rounded-md text-sm text-slate-200 hover:bg-sky-500/10 border border-transparent hover:border-sky-500/30"
+          >
+            🔌 Passerelle opérateur
           </Link>
           {DOMAINES.map((d) => {
             const a = ACCENTS[d.couleur];
@@ -83,7 +90,10 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
             ))}
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">
+          <BandeauPasserelle />
+          {children}
+        </main>
       </div>
     </div>
   );

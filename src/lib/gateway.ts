@@ -1,60 +1,79 @@
 import "server-only";
 
 /**
- * Passerelle opérateur réelle (RF-001, RF-002).
- * Si les variables TWILIO_* sont configurées, les SMS et WhatsApp partent
- * réellement via Twilio ; sinon la plateforme reste en mode démonstration
- * (enregistrement réel en base, sans envoi physique).
+ * Passerelle opérateur réelle (RF-001, RF-002, RF-007).
+ *
+ * Si les variables TWILIO_* sont configurées, les SMS, WhatsApp et appels
+ * partent réellement via Twilio. Sinon la plateforme reste en mode
+ * démonstration : l'enregistrement, le routage Least-Cost, la conformité DND
+ * et le CDR sont réels, mais AUCUN envoi physique n'a lieu — le statut
+ * résultant est alors « simule », jamais « livre ».
  */
+
 export type ResultatPasserelle =
-  | { mode: "demo" }
+  | { mode: "demo"; raison: string }
   | { mode: "reel"; statut: "envoye" | "echoue"; fournisseurId: string | null; erreur: string | null };
 
-export function passerelleConfiguree(): boolean {
-  return Boolean(
-    process.env.TWILIO_ACCOUNT_SID &&
-      process.env.TWILIO_AUTH_TOKEN &&
-      process.env.TWILIO_PHONE_NUMBER
-  );
+export type EtatPasserelle = {
+  configuree: boolean;
+  sid: boolean;
+  token: boolean;
+  numero: boolean;
+  numeroAffiche: string | null;
+  canauxReels: string[];
+};
+
+const CANAUX_SMS = ["sms", "whatsapp"];
+
+export function etatPasserelle(): EtatPasserelle {
+  const sid = Boolean(process.env.TWILIO_ACCOUNT_SID);
+  const token = Boolean(process.env.TWILIO_AUTH_TOKEN);
+  const numero = process.env.TWILIO_PHONE_NUMBER ?? null;
+  const configuree = sid && token && Boolean(numero);
+  return {
+    configuree,
+    sid,
+    token,
+    numero: Boolean(numero),
+    numeroAffiche: numero,
+    canauxReels: configuree ? ["sms", "whatsapp", "voix"] : [],
+  };
 }
 
-export async function envoyerViaPasserelle(
-  canal: string,
-  vers: string,
-  contenu: string
-): Promise<ResultatPasserelle> {
+export function passerelleConfiguree(): boolean {
+  return etatPasserelle().configuree;
+}
+
+function identifiants() {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const numero = process.env.TWILIO_PHONE_NUMBER;
-  if (!sid || !token || !numero || !["sms", "whatsapp"].includes(canal)) {
-    return { mode: "demo" };
-  }
+  if (!sid || !token || !numero) return null;
+  return {
+    sid,
+    numero,
+    auth: "Basic " + Buffer.from(`${sid}:${token}`).toString("base64"),
+  };
+}
 
-  const corps = new URLSearchParams({
-    To: canal === "whatsapp" ? `whatsapp:${vers}` : vers,
-    From: canal === "whatsapp" ? `whatsapp:${numero}` : numero,
-    Body: contenu,
-  });
-
+async function appelerTwilio(
+  chemin: string,
+  corps: URLSearchParams,
+  auth: string
+): Promise<ResultatPasserelle> {
   try {
-    const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: "Basic " + Buffer.from(`${sid}:${token}`).toString("base64"),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: corps,
-      }
-    );
-    const json = (await res.json()) as { sid?: string; message?: string };
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${chemin}`, {
+      method: "POST",
+      headers: { Authorization: auth, "Content-Type": "application/x-www-form-urlencoded" },
+      body: corps,
+    });
+    const json = (await res.json()) as { sid?: string; message?: string; code?: number };
     if (!res.ok) {
       return {
         mode: "reel",
         statut: "echoue",
         fournisseurId: null,
-        erreur: `Twilio ${res.status} : ${json.message ?? "erreur inconnue"}`,
+        erreur: `Twilio ${res.status}${json.code ? ` (code ${json.code})` : ""} : ${json.message ?? "erreur inconnue"}`,
       };
     }
     return { mode: "reel", statut: "envoye", fournisseurId: json.sid ?? null, erreur: null };
@@ -66,4 +85,44 @@ export async function envoyerViaPasserelle(
       erreur: e instanceof Error ? e.message : "Passerelle injoignable",
     };
   }
+}
+
+/** Envoi réel d'un SMS ou WhatsApp (RF-001, RF-002). */
+export async function envoyerViaPasserelle(
+  canal: string,
+  vers: string,
+  contenu: string
+): Promise<ResultatPasserelle> {
+  if (!CANAUX_SMS.includes(canal)) {
+    return { mode: "demo", raison: `Canal ${canal} sans passerelle réelle configurée` };
+  }
+  const id = identifiants();
+  if (!id) {
+    return { mode: "demo", raison: "Identifiants TWILIO_* absents — aucun envoi physique" };
+  }
+  const corps = new URLSearchParams({
+    To: canal === "whatsapp" ? `whatsapp:${vers}` : vers,
+    From: canal === "whatsapp" ? `whatsapp:${id.numero}` : id.numero,
+    Body: contenu,
+  });
+  return appelerTwilio(`${id.sid}/Messages.json`, corps, id.auth);
+}
+
+/** Lancement réel d'un appel vocal (RF-007). */
+export async function appelerViaPasserelle(
+  vers: string,
+  message: string
+): Promise<ResultatPasserelle> {
+  const id = identifiants();
+  if (!id) {
+    return { mode: "demo", raison: "Identifiants TWILIO_* absents — aucun appel physique" };
+  }
+  // TwiML minimal : la plateforme lit le message puis raccroche.
+  const twiml = `<Response><Say language="fr-FR">${message.replace(/[<>&]/g, "")}</Say></Response>`;
+  const corps = new URLSearchParams({
+    To: vers,
+    From: id.numero,
+    Twiml: twiml,
+  });
+  return appelerTwilio(`${id.sid}/Calls.json`, corps, id.auth);
 }

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import crypto from "crypto";
 import { pool } from "./db";
 import { exigerEcriture, exigerAdmin, audit } from "./auth";
-import { envoyerViaPasserelle } from "./gateway";
+import { envoyerViaPasserelle, appelerViaPasserelle } from "./gateway";
 
 /** Routage Least-Cost (RF-001) : choisit l'opérateur le moins cher pour le préfixe. */
 async function routerLeastCost(canal: string, vers: string) {
@@ -50,22 +50,26 @@ export async function envoyerMessage(formData: FormData) {
 
   const route = await routerLeastCost(canal, vers);
 
-  // Passerelle réelle (Twilio) si configurée, sinon mode démonstration
+  // Passerelle réelle (Twilio) si configurée, sinon mode démonstration.
+  // En démonstration le statut est « simule » : aucun envoi physique n'a eu lieu,
+  // le message ne doit donc jamais être présenté comme livré.
   const passerelle = await envoyerViaPasserelle(canal, vers, contenu);
-  const statut = passerelle.mode === "reel" ? passerelle.statut : "livre";
-  const operateur =
-    passerelle.mode === "reel"
-      ? `Twilio → ${route?.operateur ?? "international"}`
-      : route?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut");
+  const reel = passerelle.mode === "reel";
+  const statut = reel ? passerelle.statut : "simule";
+  const operateur = reel
+    ? `Twilio → ${route?.operateur ?? "international"}`
+    : route?.operateur ?? (canal === "email" ? "SMTP direct" : canal === "push" ? "FCM" : canal === "fax" ? "FoIP Gateway" : "Route par défaut");
 
   await pool.query(
-    `INSERT INTO messages (tenant_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, erreur, delivered_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    `INSERT INTO messages (tenant_id, canal, de, vers, sujet, contenu, statut, categorie, operateur_route, pays_destination, cout, erreur, mode_envoi, fournisseur_id, delivered_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       s.tenantId, canal, de, vers, sujet, contenu, statut, categorie, operateur,
       route?.pays ?? null, route?.cout_par_unite ?? 0.0002,
-      passerelle.mode === "reel" ? passerelle.erreur : null,
-      statut === "livre" ? new Date() : null,
+      reel ? passerelle.erreur : passerelle.raison,
+      reel ? "reel" : "demo",
+      reel ? passerelle.fournisseurId : null,
+      null,
     ]
   );
   // CDR (RF-023)
@@ -101,27 +105,43 @@ export async function retirerOptOut(formData: FormData) {
   revalidatePath("/console/conformite-dnd");
 }
 
-/** Lancement d'un appel sortant (RF-007) — passerelle simulée, CDR réel. */
+/** Lancement d'un appel sortant (RF-007) — réel via Twilio si configuré, sinon simulé. */
 export async function lancerAppel(formData: FormData) {
   const s = await exigerEcriture();
   const de = String(formData.get("de") ?? "+243815550000");
   const vers = String(formData.get("vers") ?? "").trim();
   const type = String(formData.get("type") ?? "standard");
+  const message = String(formData.get("message") ?? "") || "Bonjour, ceci est un appel de la plateforme OmniComm 360.";
   if (!vers) return;
+
   const route = await routerLeastCost("voix", vers);
-  const duree = 30 + Math.floor(Math.random() * 300);
-  const cout = (duree / 60) * Number(route?.cout_par_unite ?? 0.145);
+  const passerelle = await appelerViaPasserelle(vers, message);
+  const reel = passerelle.mode === "reel";
+
+  // En démonstration : aucune durée ni MOS inventés — l'appel n'a pas eu lieu.
+  const statut = reel ? (passerelle.statut === "envoye" ? "en_cours" : "echoue") : "simule";
+  const duree = 0;
+  const cout = 0;
+
   await pool.query(
-    `INSERT INTO appels (tenant_id, direction, de, vers, statut, type, duree_secondes, mos_score, attestation_stir, cout)
-     VALUES ($1,'sortant',$2,$3,'termine',$4,$5,$6,'A',$7)`,
-    [s.tenantId, de, vers, type, duree, (3.9 + Math.random() * 0.9).toFixed(2), cout.toFixed(5)]
+    `INSERT INTO appels (tenant_id, direction, de, vers, statut, type, duree_secondes, mos_score, attestation_stir, cout, mode_envoi, fournisseur_id, erreur)
+     VALUES ($1,'sortant',$2,$3,$4,$5,$6,NULL,'A',$7,$8,$9,$10)`,
+    [
+      s.tenantId, de, vers, statut, type, duree, cout,
+      reel ? "reel" : "demo",
+      reel ? passerelle.fournisseurId : null,
+      reel ? passerelle.erreur : passerelle.raison,
+    ]
   );
-  await pool.query(
-    `INSERT INTO cdrs (tenant_id, type, source, destination, duree_secondes, cout, operateur, pays_destination)
-     VALUES ($1,'voix',$2,$3,$4,$5,$6,$7)`,
-    [s.tenantId, de, vers, duree, cout.toFixed(5), route?.operateur ?? null, route?.pays ?? null]
-  );
-  await audit("appel_sortant", vers, `Type ${type}`);
+  // CDR uniquement pour un appel réellement établi (RF-023)
+  if (reel && passerelle.statut === "envoye") {
+    await pool.query(
+      `INSERT INTO cdrs (tenant_id, type, source, destination, duree_secondes, cout, operateur, pays_destination)
+       VALUES ($1,'voix',$2,$3,$4,$5,$6,$7)`,
+      [s.tenantId, de, vers, duree, cout, route?.operateur ?? null, route?.pays ?? null]
+    );
+  }
+  await audit("appel_sortant", vers, `Type ${type} — mode ${reel ? "réel" : "démonstration"}`);
   revalidatePath("/console/appels");
 }
 

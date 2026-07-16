@@ -60,9 +60,19 @@ export default async function PageAppels() {
                 <option value="webrtc">WebRTC (navigateur)</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Message vocal (lu au décroché)</label>
+              <textarea
+                name="message"
+                rows={2}
+                defaultValue="Bonjour, ceci est un appel de la plateforme OmniComm 360."
+                className={CHAMP}
+              />
+            </div>
             <button className={BOUTON}>Appeler →</button>
             <p className="text-[11px] text-slate-500">
-              Passerelle télécom en mode démonstration — l&apos;appel est routé (Least-Cost), signé STIR/SHAKEN et génère un CDR réel.
+              Routage Least-Cost et signature STIR/SHAKEN appliqués. L&apos;appel n&apos;est réellement émis que si la
+              passerelle opérateur est configurée ; sinon il est enregistré au statut « simulé ».
             </p>
           </form>
         </Carte>

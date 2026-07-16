@@ -67,6 +67,7 @@ const COULEURS_STATUT: Record<string, string> = {
   en_attente: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   echoue: "bg-rose-500/15 text-rose-300 border-rose-500/30",
   rejete_dnd: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+  simule: "bg-orange-500/15 text-orange-300 border-orange-500/40",
   termine: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   en_cours: "bg-sky-500/15 text-sky-300 border-sky-500/30",
   sans_reponse: "bg-amber-500/15 text-amber-300 border-amber-500/30",
