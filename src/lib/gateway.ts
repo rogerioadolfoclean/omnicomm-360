@@ -56,6 +56,16 @@ function identifiants() {
   };
 }
 
+/** URL de base publique de la plateforme (pour les rappels Twilio). */
+export function urlBase(): string {
+  return process.env.APP_BASE_URL ?? "https://omnicomm-360.vercel.app";
+}
+
+/** URL du webhook qui reçoit les mises à jour de statut de livraison. */
+export function urlWebhookStatut(): string {
+  return `${urlBase()}/api/webhooks/twilio`;
+}
+
 async function appelerTwilio(
   chemin: string,
   corps: URLSearchParams,
@@ -104,6 +114,8 @@ export async function envoyerViaPasserelle(
     To: canal === "whatsapp" ? `whatsapp:${vers}` : vers,
     From: canal === "whatsapp" ? `whatsapp:${id.numero}` : id.numero,
     Body: contenu,
+    // Twilio rappellera ce webhook à chaque changement de statut (livré / échoué).
+    StatusCallback: urlWebhookStatut(),
   });
   return appelerTwilio(`${id.sid}/Messages.json`, corps, id.auth);
 }
@@ -123,6 +135,8 @@ export async function appelerViaPasserelle(
     To: vers,
     From: id.numero,
     Twiml: twiml,
+    StatusCallback: urlWebhookStatut(),
+    StatusCallbackEvent: "completed",
   });
   return appelerTwilio(`${id.sid}/Calls.json`, corps, id.auth);
 }
